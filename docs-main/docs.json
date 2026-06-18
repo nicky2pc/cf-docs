@@ -633,6 +633,14 @@
                   "sdks-tools/development-tools/pqs/optimize",
                   "sdks-tools/development-tools/pqs/reference"
                 ]
+              },
+              {
+                "group": "x402 Payments",
+                "pages": [
+                  "sdks-tools/development-tools/x402-payments",
+                  "sdks-tools/development-tools/x402-merchant",
+                  "sdks-tools/development-tools/x402-agent"
+                ]
               }
             ]
           },

@@ -1,0 +1,165 @@
+---
+title: "x402 Merchant Integration"
+description: "Gate your Express or Next.js API endpoints behind Canton Coin payments with x402 middleware."
+---
+
+You are a **merchant** if you have an HTTP API and want to charge Canton Coin (CC) per request. Your callers — agents, wallets, or any x402-compatible client — pay before your handler runs.
+
+**You do not need a CC balance.** You are receiving, not sending. Your only requirement is a Canton party ID and a one-time `TransferPreapproval`.
+
+## Before You Start
+
+You need:
+
+- A Canton party ID — your receiver identity on Canton mainnet
+- A `TransferPreapproval` created once in your Canton wallet (see Step 1)
+- Facilitator URL and `facilitatorParty` (Step 2)
+
+## Step 1 — Create a TransferPreapproval
+
+Before you can receive CC, your party must hold a `TransferPreapproval` on Canton. Without it, the facilitator refuses to settle payments to you. This is a one-time setup — not per request.
+
+Create it via your Canton validator wallet:
+
+```
+Wallet → Transfer Preapprovals → Create
+```
+
+Or via your validator's Splice API. The preapproval has no expiry — create it once and leave it.
+
+<Note>
+The auto-creation route `POST /v1/merchants/:party/preapproval` may be disabled on the facilitator you use. Create the preapproval yourself in the wallet.
+</Note>
+
+## Step 2 — Get Facilitator Parameters
+
+Call `/supported` on the facilitator to get the values you need for `PaymentRequirements`:
+
+```bash
+curl https://facilitator.ftptech.xyz/supported
+```
+
+```json
+{
+  "kinds": [{ "scheme": "exact-canton", "network": "canton:mainnet" }],
+  "signers": {
+    "canton:*": ["FTP-validator-1::1220c065ad977ae4e480b6ea5bcd96d6d73025a91ad27fa60d1385010ca01cdd39f9"]
+  }
+}
+```
+
+`signers["canton:*"][0]` is your `facilitatorParty`. Get the `synchronizerId` from your Canton Scan API or validator config — it looks like `global-domain::1220b143...`.
+
+## Step 3 — Install
+
+```bash
+# Express
+npm i @ftptech/x402-canton-core @ftptech/x402-canton-express
+
+# Next.js App Router
+npm i @ftptech/x402-canton-core @ftptech/x402-canton-next
+```
+
+## Step 4 — Define PaymentRequirements
+
+```typescript
+import type { PaymentRequirements } from "@ftptech/x402-canton-core";
+
+const paymentReq: PaymentRequirements = {
+  scheme: "exact-canton",
+  network: "canton:mainnet",
+  amount: "1.0000000000",       // 1 CC — Daml Decimal, 10 decimal places
+  asset: "canton-coin",
+  payTo: "YOUR_PARTY::1220...", // your Canton party id — CC lands here
+  maxTimeoutSeconds: 120,
+  extra: {
+    transferMethod: "external-party-amulet-rules",
+    facilitatorParty: "FTP-validator-1::1220c065...",
+    synchronizerId: "global-domain::1220b143...",
+  },
+};
+```
+
+**Amount format:** always use exactly 10 decimal places. The facilitator does a strict string comparison — `"1"` and `"1.0"` both fail; only `"1.0000000000"` matches.
+
+## Step 5 — Add Middleware
+
+### Express
+
+```typescript
+import express from "express";
+import { cantonPaymentMiddleware } from "@ftptech/x402-canton-express";
+
+const app = express();
+app.use(express.json());
+
+app.use(
+  cantonPaymentMiddleware({
+    facilitatorUrl: "https://facilitator.ftptech.xyz",
+    routes: {
+      "POST /api/inference": { accepts: [paymentReq] },
+      "GET /api/data":       { accepts: [paymentReq] },
+    },
+  })
+);
+
+// Handler runs only after payment is verified and settled
+app.post("/api/inference", (req, res) => {
+  res.json({ result: "..." });
+});
+
+app.listen(3000);
+```
+
+Route keys use `"METHOD /path"` format — exact match against `${req.method} ${req.path}`. Unregistered routes pass through ungated.
+
+### Next.js App Router
+
+```typescript
+// app/api/inference/route.ts
+import { withCantonPayment } from "@ftptech/x402-canton-next";
+import { paymentReq } from "@/lib/payment";
+
+export const POST = withCantonPayment(
+  async (req) => Response.json({ result: "..." }),
+  {
+    accepts: [paymentReq],
+    facilitatorUrl: "https://facilitator.ftptech.xyz",
+  }
+);
+```
+
+## Step 6 — Verify It Works
+
+Call your gated endpoint without payment:
+
+```bash
+curl -si https://your-api.com/api/inference \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "hello"}'
+```
+
+Expected:
+```
+HTTP/2 402
+payment-required: <base64>
+```
+
+Decode to confirm your requirements are correct:
+
+```bash
+echo "<base64-value>" | base64 -d | jq '.accepts[0]'
+```
+
+You should see your `amount`, `payTo`, and `facilitatorParty` values.
+
+## Security Notes
+
+- **Your `accepts[]` is authoritative.** The middleware ignores any amount the client claims. A client cannot request a 1 CC resource for 0.01 CC by tampering with the payment payload.
+- **Settlement happens before your handler.** If your handler throws after a successful `/settle`, the payer already paid. Handle errors gracefully — do not retry settlement.
+- **Keep `payTo` correct.** CC goes to whatever `payTo` says. If your party ID changes, update `paymentReq`.
+
+## Related Pages
+
+- [x402 HTTP Payments](/sdks-tools/development-tools/x402-payments) -- Protocol overview and facilitator setup
+- [x402 Agent Integration](/sdks-tools/development-tools/x402-agent) -- How your callers pay (the payer side)

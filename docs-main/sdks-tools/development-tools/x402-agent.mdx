@@ -1,0 +1,123 @@
+---
+title: "x402 Agent Integration"
+description: "Make automated Canton Coin payments from an agent or backend service using the canton-agent-wallet SDK."
+---
+
+An **agent** (or payer) is any client that calls x402-gated endpoints. When the server returns `402 Payment Required`, the agent creates a `TransferCommand` on the Canton ledger, attaches the payment proof, and retries — all without manual intervention.
+
+The `@ftptech/canton-agent-wallet` SDK wraps this flow behind a single `fetch`-compatible function.
+
+## Install
+
+```bash
+npm i @ftptech/canton-agent-wallet
+```
+
+## Quick Start
+
+```typescript
+import { makePayingFetch } from "@ftptech/canton-agent-wallet";
+
+const payFetch = await makePayingFetch({
+  relayUrl:  "https://facilitator.ftptech.xyz",
+  network:   "canton:mainnet",
+  partyHint: "my-agent",
+});
+
+// Works like fetch — handles 402 automatically
+const res = await payFetch("https://api.transparentscan.xyz/api/v1/x402/round");
+const data = await res.json();
+```
+
+`makePayingFetch` returns a drop-in `fetch` replacement. When the server returns a 402, it:
+
+1. Reads the `PAYMENT-REQUIRED` header
+2. Fetches the next nonce from SV Scan (`/api/scan/v0/transfer-command-counters/{party}`)
+3. Creates a `TransferCommand` via interactive submission on the participant
+4. Retries the original request with the `PAYMENT-SIGNATURE` header
+
+Your code sees only the final successful response.
+
+## Configuration
+
+```typescript
+const payFetch = await makePayingFetch({
+  relayUrl:  "https://facilitator.ftptech.xyz", // facilitator URL
+  network:   "canton:mainnet",                  // or "canton:testnet"
+  partyHint: "my-agent",                        // used to identify the party on the participant
+});
+```
+
+The SDK reads participant connection details and signing keys from the environment or wallet config. Your agent's Canton party must have a CC balance to cover payments plus sequencer traffic fees.
+
+## Environment Variables
+
+```bash
+RELAY_URL=https://facilitator.ftptech.xyz
+CANTON_NETWORK=canton:mainnet
+PARTY_HINT=my-agent
+```
+
+## Building a Polling Agent
+
+The following pattern drives continuous payments to multiple endpoints:
+
+```typescript
+import { makePayingFetch } from "@ftptech/canton-agent-wallet";
+
+const payFetch = await makePayingFetch({
+  relayUrl:  process.env.RELAY_URL!,
+  network:   process.env.CANTON_NETWORK!,
+  partyHint: process.env.PARTY_HINT!,
+});
+
+const ENDPOINTS = [
+  "https://api.transparentscan.xyz/api/v1/x402/ledger-end",
+  "https://api.transparentscan.xyz/api/v1/x402/round",
+];
+
+let i = 0;
+while (true) {
+  i++;
+  const url = ENDPOINTS[Math.floor(Math.random() * ENDPOINTS.length)]!;
+  console.log(`[#${i}] → ${url}`);
+
+  const t0 = Date.now();
+  try {
+    const res  = await payFetch(url);
+    const body = await res.text();
+    console.log(`[#${i}] ✓ ${Date.now() - t0}ms | ${body.slice(0, 120)}`);
+  } catch (err) {
+    console.log(`[#${i}] ✗ ${Date.now() - t0}ms | ${err}`);
+  }
+
+  await new Promise(r => setTimeout(r, 30_000)); // 30s between calls
+}
+```
+
+## How TransferCommand Creation Works
+
+When `payFetch` intercepts a 402, it exercises `ExternalPartyAmuletRules_CreateTransferCommand` on the Canton ledger using interactive submission:
+
+1. `POST /v2/interactive-submission/prepare` → gets `preparedTransactionHash`
+2. Agent signs the hash with its Ed25519 key
+3. `POST /v2/interactive-submission/execute` with the signature
+4. Agent polls its ACS for the new `TransferCommand` by `(sender, nonce)` to get the `transferCommandCid`
+5. Retries the original request with `PAYMENT-SIGNATURE: <base64 PaymentPayload>`
+
+The Canton ledger atomically moves CC from sender to receiver and archives the `TransferCommand` in a single transaction — there is no intermediate state where CC leaves one party without arriving at the other.
+
+## Nonce Management
+
+Each `TransferCommand` must include a strictly increasing nonce. The SDK reads `nextNonce` from the sender's `TransferCommandCounter` on SV Scan before each payment. Reusing a nonce causes the facilitator to reject with `invalid_exact_canton_nonce_reuse`.
+
+The counter is a Canton contract — it updates on-chain after each successful `TransferCommand_Send`. If your agent runs multiple concurrent payments, serialize them or partition by nonce range.
+
+## First-Request Latency
+
+The first payment after a cold start is slower than subsequent ones. SV Scan caches `AmuletRules` (5 min TTL) and `OpenMiningRound` (30 s TTL) — these caches are empty on startup, so the first request warms them. Subsequent payments typically complete in 10–25 seconds on Canton mainnet.
+
+## Related Pages
+
+- [x402 HTTP Payments](/sdks-tools/development-tools/x402-payments) -- Protocol overview and error codes
+- [x402 Merchant Integration](/sdks-tools/development-tools/x402-merchant) -- How to gate your own API endpoints
