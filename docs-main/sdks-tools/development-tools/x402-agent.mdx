@@ -1,98 +1,135 @@
 ---
 title: "x402 Agent Integration"
-description: "Make automated Canton Coin payments from an agent or backend service using the canton-agent-wallet SDK."
+description: "Make automated Canton Coin payments from an agent or backend service using the x402 client SDK."
 ---
 
 An **agent** (or payer) is any client that calls x402-gated endpoints. When the server returns `402 Payment Required`, the agent creates a `TransferCommand` on the Canton ledger, attaches the payment proof, and retries — all without manual intervention.
 
-The `@ftptech/canton-agent-wallet` SDK wraps this flow behind a single `fetch`-compatible function.
-
 ## Install
 
 ```bash
-npm i @ftptech/canton-agent-wallet
+npm i @canton-network/x402-canton-client
 ```
 
-## Quick Start
+## Onboarding
+
+Before making payments, the agent needs a Canton party with an Ed25519 signing key. `ensureWallet` handles key generation, party allocation, and persistence. On subsequent runs it restores from the saved key.
 
 ```typescript
-import { makePayingFetch } from "@ftptech/canton-agent-wallet";
+import { ensureWallet } from "@canton-network/x402-canton-client";
 
-const payFetch = await makePayingFetch({
-  relayUrl:  "https://facilitator.ftptech.xyz",
+const wallet = await ensureWallet({
+  relayUrl:  "https://<your-facilitator>",
   network:   "canton:mainnet",
   partyHint: "my-agent",
 });
 
-// Works like fetch — handles 402 automatically
-const res = await payFetch("https://api.transparentscan.xyz/api/v1/x402/round");
+console.log(wallet.party); // "my-agent::1220..."
+```
+
+To restore an existing key (e.g. after re-deploying):
+
+```typescript
+const wallet = await ensureWallet({
+  relayUrl:  "https://<your-facilitator>",
+  network:   "canton:mainnet",
+  key:       existingKeyMaterial,
+  restore:   true,             // skip re-allocation; party already on-ledger
+});
+```
+
+## Balance
+
+```typescript
+import { RelayClient } from "@canton-network/x402-canton-client";
+
+const relay = new RelayClient({ relayUrl: "https://<your-facilitator>" });
+const balance = await relay.balance(wallet.party);
+
+console.log(balance.cc);       // "12.3400000000"  — human-readable CC
+console.log(balance.amulet);   // 12.34            — numeric
+console.log(balance.holdings); // [{ cid, amount }, ...]
+```
+
+## Making Payments
+
+`makePayingFetch` returns a drop-in `fetch` replacement. It intercepts `402 Payment Required`, creates a `TransferCommand` on-ledger, and retries the request automatically.
+
+```typescript
+import { makePayingFetch } from "@canton-network/x402-canton-client";
+
+const payFetch = await makePayingFetch({
+  relayUrl:  "https://<your-facilitator>",
+  network:   "canton:mainnet",
+  partyHint: "my-agent",
+});
+
+const res = await payFetch("https://api.example.com/resource");
 const data = await res.json();
 ```
 
-`makePayingFetch` returns a drop-in `fetch` replacement. When the server returns a 402, it:
+### Read payment metadata from the response
 
-1. Reads the `PAYMENT-REQUIRED` header
-2. Fetches the next nonce from SV Scan (`/api/scan/v0/transfer-command-counters/{party}`)
-3. Creates a `TransferCommand` via interactive submission on the participant
-4. Retries the original request with the `PAYMENT-SIGNATURE` header
+```typescript
+import { readPaymentResponseHeader } from "@canton-network/x402-canton-client";
 
-Your code sees only the final successful response.
+const res = await payFetch("https://api.example.com/resource");
+const payment = readPaymentResponseHeader(res);
+// { transaction: "<updateId>", network: "canton:mainnet", ... }
+```
 
-## Configuration
+### Advanced options
 
 ```typescript
 const payFetch = await makePayingFetch({
-  relayUrl:  "https://facilitator.ftptech.xyz", // facilitator URL
-  network:   "canton:mainnet",                  // or "canton:testnet"
-  partyHint: "my-agent",                        // used to identify the party on the participant
+  relayUrl:  "https://<your-facilitator>",
+  network:   "canton:mainnet",
+  partyHint: "my-agent",
+  // restrict which Canton networks to pay on
+  networkFilter: (n) => n === "canton:mainnet",
+  // retries on transient 402s (default 4)
+  maxPaymentRetries: 4,
 });
 ```
 
-The SDK reads participant connection details and signing keys from the environment or wallet config. Your agent's Canton party must have a CC balance to cover payments plus sequencer traffic fees.
+## Withdraw
 
-## Environment Variables
-
-```bash
-RELAY_URL=https://facilitator.ftptech.xyz
-CANTON_NETWORK=canton:mainnet
-PARTY_HINT=my-agent
-```
-
-## Building a Polling Agent
-
-The following pattern drives continuous payments to multiple endpoints:
+Send CC to any Canton party — for topping up a sub-agent, moving funds to a wallet, or collecting earnings.
 
 ```typescript
-import { makePayingFetch } from "@ftptech/canton-agent-wallet";
+import { withdraw } from "@canton-network/x402-canton-client";
 
-const payFetch = await makePayingFetch({
-  relayUrl:  process.env.RELAY_URL!,
-  network:   process.env.CANTON_NETWORK!,
-  partyHint: process.env.PARTY_HINT!,
+// Send a specific amount
+const result = await withdraw({
+  to:     "recipient::1220...",
+  amount: "5.0000000000",      // Daml Decimal string, 10 decimal places
 });
+console.log(result.updateId);  // Canton ledger updateId of the transfer
+console.log(result.amount);    // amount actually sent
 
-const ENDPOINTS = [
-  "https://api.transparentscan.xyz/api/v1/x402/ledger-end",
-  "https://api.transparentscan.xyz/api/v1/x402/round",
-];
+// Send full balance
+const result = await withdraw({ to: "recipient::1220..." });
+```
 
-let i = 0;
-while (true) {
-  i++;
-  const url = ENDPOINTS[Math.floor(Math.random() * ENDPOINTS.length)]!;
-  console.log(`[#${i}] → ${url}`);
+## Pending Incoming Transfers
 
-  const t0 = Date.now();
-  try {
-    const res  = await payFetch(url);
-    const body = await res.text();
-    console.log(`[#${i}] ✓ ${Date.now() - t0}ms | ${body.slice(0, 120)}`);
-  } catch (err) {
-    console.log(`[#${i}] ✗ ${Date.now() - t0}ms | ${err}`);
-  }
+Check for CC transfers incoming to the agent's party that are not yet claimed:
 
-  await new Promise(r => setTimeout(r, 30_000)); // 30s between calls
+```typescript
+const relay = new RelayClient({ relayUrl: "https://<your-facilitator>" });
+const pending = await relay.pending(wallet.party);
+
+for (const tx of pending.pending) {
+  console.log(tx.cid, tx.amount, tx.sender);
 }
+```
+
+## Facilitator Discovery
+
+```typescript
+const relay = new RelayClient({ relayUrl: "https://<your-facilitator>" });
+const info = await relay.supported();
+// { kinds: [{ scheme: "exact-canton", network: "canton:mainnet" }], ... }
 ```
 
 ## How TransferCommand Creation Works
@@ -102,16 +139,14 @@ When `payFetch` intercepts a 402, it exercises `ExternalPartyAmuletRules_CreateT
 1. `POST /v2/interactive-submission/prepare` → gets `preparedTransactionHash`
 2. Agent signs the hash with its Ed25519 key
 3. `POST /v2/interactive-submission/execute` with the signature
-4. Agent polls its ACS for the new `TransferCommand` by `(sender, nonce)` to get the `transferCommandCid`
+4. Agent resolves the `transferCommandCid` from the create `updateId`
 5. Retries the original request with `PAYMENT-SIGNATURE: <base64 PaymentPayload>`
 
-The Canton ledger atomically moves CC from sender to receiver and archives the `TransferCommand` in a single transaction — there is no intermediate state where CC leaves one party without arriving at the other.
+The Canton ledger atomically moves CC from sender to receiver and archives the `TransferCommand` in a single transaction.
 
 ## Nonce Management
 
 Each `TransferCommand` must include a strictly increasing nonce. The SDK reads `nextNonce` from the sender's `TransferCommandCounter` on SV Scan before each payment. Reusing a nonce causes the facilitator to reject with `invalid_exact_canton_nonce_reuse`.
-
-The counter is a Canton contract — it updates on-chain after each successful `TransferCommand_Send`. If your agent runs multiple concurrent payments, serialize them or partition by nonce range.
 
 ## First-Request Latency
 

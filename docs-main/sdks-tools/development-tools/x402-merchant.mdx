@@ -13,7 +13,7 @@ You need:
 
 - A Canton party ID — your receiver identity on Canton mainnet
 - A `TransferPreapproval` created once in your Canton wallet (see Step 1)
-- Facilitator URL and `facilitatorParty` (Step 2)
+- A facilitator URL, party ID, and synchronizer ID (Step 2)
 
 ## Step 1 — Create a TransferPreapproval
 
@@ -27,55 +27,51 @@ Wallet → Transfer Preapprovals → Create
 
 Or via your validator's Splice API. The preapproval has no expiry — create it once and leave it.
 
-<Note>
-The auto-creation route `POST /v1/merchants/:party/preapproval` may be disabled on the facilitator you use. Create the preapproval yourself in the wallet.
-</Note>
-
 ## Step 2 — Get Facilitator Parameters
 
-Call `/supported` on the facilitator to get the values you need for `PaymentRequirements`:
+Call `GET /supported` on your facilitator to get the values you need:
 
 ```bash
-curl https://facilitator.ftptech.xyz/supported
+curl https://<your-facilitator>/supported
 ```
 
 ```json
 {
   "kinds": [{ "scheme": "exact-canton", "network": "canton:mainnet" }],
   "signers": {
-    "canton:*": ["FTP-validator-1::1220c065ad977ae4e480b6ea5bcd96d6d73025a91ad27fa60d1385010ca01cdd39f9"]
+    "canton:*": ["<facilitator-party>::1220..."]
   }
 }
 ```
 
-`signers["canton:*"][0]` is your `facilitatorParty`. Get the `synchronizerId` from your Canton Scan API or validator config — it looks like `global-domain::1220b143...`.
+From this response: `signers["canton:*"][0]` is your `facilitatorParty`. Get the `synchronizerId` from your Canton Scan API or validator config.
 
 ## Step 3 — Install
 
 ```bash
 # Express
-npm i @ftptech/x402-canton-core @ftptech/x402-canton-express
+npm i @canton-network/x402-canton-core @canton-network/x402-canton-express
 
 # Next.js App Router
-npm i @ftptech/x402-canton-core @ftptech/x402-canton-next
+npm i @canton-network/x402-canton-core @canton-network/x402-canton-next
 ```
 
 ## Step 4 — Define PaymentRequirements
 
 ```typescript
-import type { PaymentRequirements } from "@ftptech/x402-canton-core";
+import type { PaymentRequirements } from "@canton-network/x402-canton-core";
 
 const paymentReq: PaymentRequirements = {
   scheme: "exact-canton",
   network: "canton:mainnet",
-  amount: "1.0000000000",       // 1 CC — Daml Decimal, 10 decimal places
+  amount: "1.0000000000",           // Daml Decimal string, 10 decimal places
   asset: "canton-coin",
-  payTo: "YOUR_PARTY::1220...", // your Canton party id — CC lands here
+  payTo: "<YOUR_PARTY>::1220...",   // your Canton party id — CC lands here
   maxTimeoutSeconds: 120,
   extra: {
     transferMethod: "external-party-amulet-rules",
-    facilitatorParty: "FTP-validator-1::1220c065...",
-    synchronizerId: "global-domain::1220b143...",
+    facilitatorParty: "<FACILITATOR_PARTY>::1220...",
+    synchronizerId: "global-domain::1220...",
   },
 };
 ```
@@ -88,23 +84,27 @@ const paymentReq: PaymentRequirements = {
 
 ```typescript
 import express from "express";
-import { cantonPaymentMiddleware } from "@ftptech/x402-canton-express";
+import { cantonPaymentMiddleware } from "@canton-network/x402-canton-express";
 
 const app = express();
 app.use(express.json());
 
 app.use(
   cantonPaymentMiddleware({
-    facilitatorUrl: "https://facilitator.ftptech.xyz",
+    facilitatorUrl: "https://<your-facilitator>",
     routes: {
-      "POST /api/inference": { accepts: [paymentReq] },
-      "GET /api/data":       { accepts: [paymentReq] },
+      "POST /api/data": {
+        accepts:     [paymentReq],
+        description: "Access to premium data",  // shown to clients in 402 body
+        mimeType:    "application/json",
+      },
+      "GET /api/data": { accepts: [paymentReq] },
     },
   })
 );
 
 // Handler runs only after payment is verified and settled
-app.post("/api/inference", (req, res) => {
+app.post("/api/data", (req, res) => {
   res.json({ result: "..." });
 });
 
@@ -116,15 +116,14 @@ Route keys use `"METHOD /path"` format — exact match against `${req.method} ${
 ### Next.js App Router
 
 ```typescript
-// app/api/inference/route.ts
-import { withCantonPayment } from "@ftptech/x402-canton-next";
-import { paymentReq } from "@/lib/payment";
+// app/api/data/route.ts
+import { withCantonPayment } from "@canton-network/x402-canton-next";
 
 export const POST = withCantonPayment(
   async (req) => Response.json({ result: "..." }),
   {
     accepts: [paymentReq],
-    facilitatorUrl: "https://facilitator.ftptech.xyz",
+    facilitatorUrl: "https://<your-facilitator>",
   }
 );
 ```
@@ -134,9 +133,9 @@ export const POST = withCantonPayment(
 Call your gated endpoint without payment:
 
 ```bash
-curl -si https://your-api.com/api/inference \
+curl -si https://your-api.com/api/data \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "hello"}'
+  -d '{}'
 ```
 
 Expected:

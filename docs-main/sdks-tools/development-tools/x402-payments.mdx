@@ -46,50 +46,36 @@ The facilitator acts as `delegate` on the `TransferCommand`. Canton's privacy mo
 {
   "scheme": "exact-canton",
   "network": "canton:mainnet",
-  "amount": "0.0300000000",
+  "amount": "1.0000000000",
   "asset": "canton-coin",
-  "payTo": "merchant_party::1220abc...",
+  "payTo": "<receiver-party>::1220...",
   "maxTimeoutSeconds": 60,
   "extra": {
     "transferMethod": "external-party-amulet-rules",
-    "facilitatorParty": "facilitator::1220def...",
-    "synchronizerId": "global-domain::1220xyz..."
+    "facilitatorParty": "<facilitator-party>::1220...",
+    "synchronizerId": "global-domain::1220..."
   }
 }
 ```
 
-`amount` is a Daml Decimal string — always 10 decimal places. `"0.0300000000"` = 0.03 CC, `"1.0000000000"` = 1 CC. The facilitator does a strict string comparison; numeric coercion is not applied.
+`amount` is a Daml Decimal string — always 10 decimal places. `"1.0000000000"` = 1 CC. The facilitator does a strict string comparison against the on-ledger value; numeric coercion is not applied.
 
-## Running a Facilitator
+## The Facilitator
 
-The reference facilitator is available as a Docker image. It connects to a Canton participant and uses SV Scan for contract resolution.
+A facilitator is a service that bridges x402 and the Canton ledger. It holds a Canton party, reads `TransferCommand` contracts from its ACS, and exercises `TransferCommand_Send` on behalf of merchants. The facilitator sponsors sequencer traffic fees; the merchant pays nothing per-request.
 
-```bash
-docker run -d \
-  -e CANTON_RELAY_URL=https://your-participant:5003 \
-  -e CANTON_PARTY=facilitator::1220... \
-  -e CANTON_NETWORK=canton:mainnet \
-  -e CANTON_SCAN_URL=https://scan.sv-1.global.canton.network.digitalasset.com:8443 \
-  -p 3000:3000 \
-  ghcr.io/ftptech/canton-x402-facilitator:latest
-```
-
-The facilitator exposes two routes:
+The facilitator exposes two endpoints that the resource server calls:
 
 - `POST /verify` — validates a `TransferCommand` against `PaymentRequirements`
 - `POST /settle` — exercises `TransferCommand_Send` and returns the ledger `updateId`
 
-To discover the facilitator's party ID and synchronizer ID:
-
-```bash
-curl https://facilitator.ftptech.xyz/supported
-```
+Use `GET /supported` on any facilitator to discover its party ID and the networks it serves:
 
 ```json
 {
   "kinds": [{ "scheme": "exact-canton", "network": "canton:mainnet" }],
   "signers": {
-    "canton:*": ["FTP-validator-1::1220c065..."]
+    "canton:*": ["<facilitator-party>::1220..."]
   }
 }
 ```
@@ -109,11 +95,6 @@ Canton provides native replay protection. `TransferCommand_Send` archives the co
 | `invalid_exact_canton_resource_url_mismatch` | `description.resourceUrl` ≠ `resource.url` |
 | `invalid_exact_canton_merchant_not_registered` | `MerchantContract` absent or belongs to a different merchant |
 | `unexpected_canton_ledger_error` | Scan or ledger timeout not covered by the above codes |
-
-## Live Examples
-
-- **[TransparentscanXYZ](https://transparentscan.xyz)** — public Canton ledger explorer with x402-gated endpoints at `/api/v1/x402/ledger-end` and `/api/v1/x402/round`, 0.03 CC per call on `canton:mainnet`
-- **[CanTrustAI](https://cantrustai.xyz)** — LLM inference gated with x402, multiple open-source models, on `canton:mainnet`
 
 ## Related Pages
 
