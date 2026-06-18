@@ -50,16 +50,16 @@ From this response: `signers["canton:*"][0]` is your `facilitatorParty`. Get the
 
 ```bash
 # Express
-npm i @canton-network/x402-canton-core @canton-network/x402-canton-express
+npm i @ftptech/x402-canton-core @ftptech/x402-canton-express
 
 # Next.js App Router
-npm i @canton-network/x402-canton-core @canton-network/x402-canton-next
+npm i @ftptech/x402-canton-core @ftptech/x402-canton-next
 ```
 
 ## Step 4 — Define PaymentRequirements
 
 ```typescript
-import type { PaymentRequirements } from "@canton-network/x402-canton-core";
+import type { PaymentRequirements } from "@ftptech/x402-canton-core";
 
 const paymentReq: PaymentRequirements = {
   scheme: "exact-canton",
@@ -84,7 +84,7 @@ const paymentReq: PaymentRequirements = {
 
 ```typescript
 import express from "express";
-import { cantonPaymentMiddleware } from "@canton-network/x402-canton-express";
+import { cantonPaymentMiddleware } from "@ftptech/x402-canton-express";
 
 const app = express();
 app.use(express.json());
@@ -117,7 +117,7 @@ Route keys use `"METHOD /path"` format — exact match against `${req.method} ${
 
 ```typescript
 // app/api/data/route.ts
-import { withCantonPayment } from "@canton-network/x402-canton-next";
+import { withCantonPayment } from "@ftptech/x402-canton-next";
 
 export const POST = withCantonPayment(
   async (req) => Response.json({ result: "..." }),

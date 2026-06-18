@@ -8,13 +8,7 @@ An **agent** (or payer) is any client that calls x402-gated endpoints. When the 
 ## Install
 
 ```bash
-npm i -g canton-agent-wallet
-```
-
-Set the facilitator URL once (or pass `--relay-url` per command):
-
-```bash
-export CANTON_AGENT_RELAY_URL=https://<your-facilitator>
+npm i @ftptech/canton-agent-wallet@latest
 ```
 
 ## CLI Commands
@@ -24,7 +18,7 @@ export CANTON_AGENT_RELAY_URL=https://<your-facilitator>
 Generates an Ed25519 key pair, allocates a Canton party, and saves the wallet to `~/.canton-agent/wallet.json`.
 
 ```bash
-canton-agent-wallet create
+canton-agent-wallet create --relay-url https://<your-facilitator>
 # wallet ready (canton:mainnet)
 #   party:   my-agent::1220...
 #   fund me: send CC to that party id, then run: canton-agent-wallet claim
@@ -43,7 +37,7 @@ canton-agent-wallet address
 ### Balance
 
 ```bash
-canton-agent-wallet balance
+canton-agent-wallet balance --relay-url https://<your-facilitator>
 # 12.3400000000 CC  (3 holdings)
 ```
 
@@ -52,30 +46,30 @@ canton-agent-wallet balance
 Accept incoming CC transfers (e.g. the initial funding from a wallet):
 
 ```bash
-canton-agent-wallet claim
+canton-agent-wallet claim --relay-url https://<your-facilitator>
 # claimed 1 incoming transfer(s)
 ```
 
 ### Pay
 
-Fetch any URL, automatically paying any x402 `402` challenge:
+Fetch a URL, automatically paying any x402 `402` challenge:
 
 ```bash
-canton-agent-wallet pay https://api.example.com/resource
+canton-agent-wallet pay --relay-url https://<your-facilitator> https://api.example.com/resource
 ```
 
-The CLI handles the full flow: reads the nonce, creates the `TransferCommand`, retries with the payment proof.
+For POST endpoints (e.g. LLM inference with a request body), use `makePayingFetch` from the SDK instead.
 
 ### Withdraw
 
 Send CC to any Canton party:
 
 ```bash
-# Send a specific amount
-canton-agent-wallet withdraw --to "recipient::1220..." --amount 5.0000000000
+# Partial amount
+canton-agent-wallet withdraw --relay-url https://<your-facilitator> --to "recipient::1220..." --amount 5.0000000000
 
-# Send full balance
-canton-agent-wallet withdraw --to "recipient::1220..."
+# Full balance
+canton-agent-wallet withdraw --relay-url https://<your-facilitator> --to "recipient::1220..."
 ```
 
 ### Export / Import
@@ -86,7 +80,7 @@ Back up and restore the wallet key:
 # Export (prints private key — store securely)
 canton-agent-wallet export > my-agent.pem
 
-# Import on a new machine
+# Restore on a new machine
 canton-agent-wallet import --relay-url https://<your-facilitator> --key-file my-agent.pem
 ```
 
@@ -94,36 +88,40 @@ canton-agent-wallet import --relay-url https://<your-facilitator> --key-file my-
 
 | Variable | Description |
 |---|---|
-| `CANTON_AGENT_RELAY_URL` | Facilitator URL — required for `create`, `pay`, `import` |
-| `CANTON_AGENT_NETWORK` | Canton network (default: `canton:testnet`) |
+| `CANTON_AGENT_RELAY_URL` | Facilitator URL — alternative to `--relay-url` on every command |
+| `CANTON_AGENT_NETWORK` | Canton network (default: `canton:testnet` — set to `canton:mainnet` for mainnet) |
 | `CANTON_AGENT_API_KEY` | API key if the facilitator requires one |
+| `HTTPS_PROXY` | HTTP proxy for outbound requests |
+
+<Warning>
+`CANTON_AGENT_NETWORK` defaults to `canton:testnet`. Always set it to `canton:mainnet` when connecting to mainnet.
+</Warning>
 
 ## SDK Usage
 
 For programmatic use (e.g. embedding payments in a backend service):
 
 ```typescript
-import { makePayingFetch, withdraw, RelayClient, ensureWallet } from "canton-agent-wallet";
+import { makePayingFetch } from "@ftptech/canton-agent-wallet";
 
-// Onboard or restore wallet
-const wallet = await ensureWallet({
-  relayUrl:  process.env.CANTON_AGENT_RELAY_URL!,
-  network:   "canton:mainnet",
-  partyHint: "my-agent",
+// Creates or loads wallet, resolves Canton party
+const payFetch = await makePayingFetch({
+  relayUrl: "https://<your-facilitator>",
+  network:  "canton:mainnet",
 });
 
-// Check balance
-const relay = new RelayClient({ relayUrl: wallet.relayUrl });
-const balance = await relay.balance(wallet.party);
-console.log(balance.cc); // "12.3400000000"
-
-// Pay any x402-gated URL
-const payFetch = await makePayingFetch({ relayUrl: wallet.relayUrl, network: wallet.network });
-const res = await payFetch("https://api.example.com/resource");
-
-// Withdraw
-await withdraw({ to: "recipient::1220...", amount: "5.0000000000" });
+// Drop-in fetch replacement — 402 is detected, paid, and retried automatically
+const res = await payFetch("https://api.example.com/resource", {
+  method:  "POST",
+  headers: { "Content-Type": "application/json" },
+  body:    JSON.stringify({ prompt: "hello" }),
+});
+const data = await res.json();
 ```
+
+## Wallet File
+
+The wallet is stored at `~/.canton-agent/wallet.json` with permissions `0600`. It contains the Ed25519 private key and the allocated Canton party ID. **Back it up — losing the file loses access to the funds it holds.**
 
 ## How TransferCommand Creation Works
 
