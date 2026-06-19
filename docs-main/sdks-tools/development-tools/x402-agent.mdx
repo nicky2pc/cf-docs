@@ -18,7 +18,7 @@ npm i @ftptech/canton-agent-wallet@latest
 Generates an Ed25519 key pair, allocates a Canton party, and saves the wallet to `~/.canton-agent/wallet.json`.
 
 ```bash
-canton-agent-wallet create --relay-url https://<your-facilitator>
+canton-agent-wallet create --relay-url https://facilitator.ftptech.xyz
 # wallet ready (canton:mainnet)
 #   party:   my-agent::1220...
 #   fund me: send CC to that party id, then run: canton-agent-wallet claim
@@ -37,7 +37,7 @@ canton-agent-wallet address
 ### Balance
 
 ```bash
-canton-agent-wallet balance --relay-url https://<your-facilitator>
+canton-agent-wallet balance --relay-url https://facilitator.ftptech.xyz
 # <amount> CC  (<n> holdings)
 ```
 
@@ -46,7 +46,7 @@ canton-agent-wallet balance --relay-url https://<your-facilitator>
 Accept incoming CC transfers (e.g. the initial funding from a wallet):
 
 ```bash
-canton-agent-wallet claim --relay-url https://<your-facilitator>
+canton-agent-wallet claim --relay-url https://facilitator.ftptech.xyz
 # claimed 1 incoming transfer(s)
 ```
 
@@ -55,7 +55,7 @@ canton-agent-wallet claim --relay-url https://<your-facilitator>
 Fetch a URL, automatically paying any x402 `402` challenge:
 
 ```bash
-canton-agent-wallet pay --relay-url https://<your-facilitator> https://api.example.com/resource
+canton-agent-wallet pay --relay-url https://facilitator.ftptech.xyz https://api.example.com/resource
 ```
 
 For POST endpoints (e.g. LLM inference with a request body), use `makePayingFetch` from the SDK instead.
@@ -66,10 +66,10 @@ Send CC to any Canton party:
 
 ```bash
 # Partial amount
-canton-agent-wallet withdraw --relay-url https://<your-facilitator> --to "recipient::1220..." --amount 5.0000000000
+canton-agent-wallet withdraw --relay-url https://facilitator.ftptech.xyz --to "recipient::1220..." --amount 5.0000000000
 
 # Full balance
-canton-agent-wallet withdraw --relay-url https://<your-facilitator> --to "recipient::1220..."
+canton-agent-wallet withdraw --relay-url https://facilitator.ftptech.xyz --to "recipient::1220..."
 ```
 
 ### Export / Import
@@ -81,7 +81,7 @@ Back up and restore the wallet key:
 canton-agent-wallet export > my-agent.pem
 
 # Restore on a new machine
-canton-agent-wallet import --relay-url https://<your-facilitator> --key-file my-agent.pem
+canton-agent-wallet import --relay-url https://facilitator.ftptech.xyz --key-file my-agent.pem
 ```
 
 ## Environment Variables
@@ -106,7 +106,7 @@ import { makePayingFetch } from "@ftptech/canton-agent-wallet";
 
 // Creates or loads wallet, resolves Canton party
 const payFetch = await makePayingFetch({
-  relayUrl: "https://<your-facilitator>",
+  relayUrl: "https://facilitator.ftptech.xyz",
   network:  "canton:mainnet",
 });
 

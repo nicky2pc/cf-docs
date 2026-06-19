@@ -32,19 +32,19 @@ Or via your validator's Splice API. The preapproval has no expiry — create it 
 Call `GET /supported` on your facilitator to get the values you need:
 
 ```bash
-curl https://<your-facilitator>/supported
+curl https://facilitator.ftptech.xyz/supported
 ```
 
 ```json
 {
-  "kinds": [{ "scheme": "exact-canton", "network": "canton:mainnet" }],
+  "kinds": [{ "scheme": "exact", "network": "canton:mainnet" }],
   "signers": {
-    "canton:*": ["<facilitator-party>::1220..."]
+    "canton:*": ["FTP-validator-1::1220c065ad977ae4e480b6ea5bcd96d6d73025a91ad27fa60d1385010ca01cdd39f9"]
   }
 }
 ```
 
-From this response: `signers["canton:*"][0]` is your `facilitatorParty`. Get the `synchronizerId` from your Canton Scan API or validator config.
+From this response: `signers["canton:*"][0]` is your `feePayer`. Get the `synchronizerId` from your Canton Scan API or validator config.
 
 ## Step 3 — Install
 
@@ -62,21 +62,21 @@ npm i @ftptech/x402-canton-core @ftptech/x402-canton-next
 import type { PaymentRequirements } from "@ftptech/x402-canton-core";
 
 const paymentReq: PaymentRequirements = {
-  scheme: "exact-canton",
+  scheme: "exact",
   network: "canton:mainnet",
-  amount: "1.0000000000",           // Daml Decimal string, 10 decimal places
-  asset: "canton-coin",
+  amount: "10000000000",            // atomic units — 1 CC = 10^10 units
+  asset: "CC",
   payTo: "<YOUR_PARTY>::1220...",   // your Canton party id — CC lands here
   maxTimeoutSeconds: 120,
   extra: {
-    transferMethod: "external-party-amulet-rules",
-    facilitatorParty: "<FACILITATOR_PARTY>::1220...",
+    assetTransferMethod: "external-party-amulet-rules",
+    feePayer: "FTP-validator-1::1220c065ad977ae4e480b6ea5bcd96d6d73025a91ad27fa60d1385010ca01cdd39f9",
     synchronizerId: "global-domain::1220...",
   },
 };
 ```
 
-**Amount format:** always use exactly 10 decimal places. The facilitator does a strict string comparison — `"1"` and `"1.0"` both fail; only `"1.0000000000"` matches.
+**Amount format:** an integer string of atomic units (1 CC = 10^10 units). The facilitator does a strict string comparison — `"10000000000"` is 1 CC; any other representation of the same value fails.
 
 ## Step 5 — Add Middleware
 
@@ -91,7 +91,7 @@ app.use(express.json());
 
 app.use(
   cantonPaymentMiddleware({
-    facilitatorUrl: "https://<your-facilitator>",
+    facilitatorUrl: "https://facilitator.ftptech.xyz",
     routes: {
       "POST /api/data": {
         accepts:     [paymentReq],
@@ -123,7 +123,7 @@ export const POST = withCantonPayment(
   async (req) => Response.json({ result: "..." }),
   {
     accepts: [paymentReq],
-    facilitatorUrl: "https://<your-facilitator>",
+    facilitatorUrl: "https://facilitator.ftptech.xyz",
   }
 );
 ```
@@ -150,7 +150,7 @@ Decode to confirm your requirements are correct:
 echo "<base64-value>" | base64 -d | jq '.accepts[0]'
 ```
 
-You should see your `amount`, `payTo`, and `facilitatorParty` values.
+You should see your `amount`, `payTo`, and `feePayer` values.
 
 ## Security Notes
 

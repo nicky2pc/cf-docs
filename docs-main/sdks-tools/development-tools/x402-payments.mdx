@@ -1,11 +1,11 @@
 ---
 title: "x402 HTTP Payments"
-description: "Gate any HTTP endpoint behind Canton Coin payments using the x402 protocol and the exact-canton scheme."
+description: "Gate any HTTP endpoint behind Canton Coin payments using the x402 protocol and the exact scheme."
 ---
 
 The [x402 protocol](https://x402.org) is an HTTP payment standard built around the `402 Payment Required` status code. A server responds with payment requirements; the client pays on-chain and retries. No API keys, no billing accounts — payment is the credential.
 
-On Canton Network, x402 uses the `exact-canton` scheme: the client creates a `TransferCommand` on the Canton ledger using Ed25519 external-party signing, and a facilitator exercises `TransferCommand_Send` — moving Canton Coin atomically while sponsoring sequencer traffic fees.
+On Canton Network, x402 uses the `exact` scheme: the client creates a `TransferCommand` on the Canton ledger using Ed25519 external-party signing, and a facilitator exercises `TransferCommand_Send` — moving Canton Coin atomically while sponsoring sequencer traffic fees.
 
 ## How It Works
 
@@ -29,36 +29,36 @@ sequenceDiagram
     R->>C: 200 + PAYMENT-RESPONSE
 ```
 
-The facilitator acts as `delegate` on the `TransferCommand`. Canton's privacy model makes the contract visible to the facilitator solely because of this stakeholder role — without `delegate = facilitatorParty`, the facilitator cannot read the command and verification fails.
+The facilitator acts as `delegate` on the `TransferCommand`. Canton's privacy model makes the contract visible to the facilitator solely because of this stakeholder role — without `delegate = feePayer`, the facilitator cannot read the command and verification fails.
 
-## Scheme: `exact-canton`
+## Scheme: `exact`
 
 | Field | Value |
 |---|---|
-| `scheme` | `exact-canton` |
-| `asset` | `canton-coin` |
-| `transferMethod` | `external-party-amulet-rules` |
+| `scheme` | `exact` |
+| `asset` | `CC` |
+| `assetTransferMethod` | `external-party-amulet-rules` |
 | Networks | `canton:mainnet`, `canton:testnet` |
 
 ### PaymentRequirements structure
 
 ```json
 {
-  "scheme": "exact-canton",
+  "scheme": "exact",
   "network": "canton:mainnet",
-  "amount": "1.0000000000",
-  "asset": "canton-coin",
+  "amount": "10000000000",
+  "asset": "CC",
   "payTo": "<receiver-party>::1220...",
   "maxTimeoutSeconds": 60,
   "extra": {
-    "transferMethod": "external-party-amulet-rules",
-    "facilitatorParty": "<facilitator-party>::1220...",
+    "assetTransferMethod": "external-party-amulet-rules",
+    "feePayer": "FTP-validator-1::1220c065ad977ae4e480b6ea5bcd96d6d73025a91ad27fa60d1385010ca01cdd39f9",
     "synchronizerId": "global-domain::1220..."
   }
 }
 ```
 
-`amount` is a Daml Decimal string — always 10 decimal places. `"1.0000000000"` = 1 CC. The facilitator does a strict string comparison against the on-ledger value; numeric coercion is not applied.
+`amount` is an integer string of atomic units — 1 CC = 10^10 units, so `"10000000000"` = 1 CC. The facilitator does a strict string comparison against the on-ledger value; numeric coercion is not applied.
 
 ## The Facilitator
 
@@ -73,9 +73,9 @@ Use `GET /supported` on any facilitator to discover its party ID and the network
 
 ```json
 {
-  "kinds": [{ "scheme": "exact-canton", "network": "canton:mainnet" }],
+  "kinds": [{ "scheme": "exact", "network": "canton:mainnet" }],
   "signers": {
-    "canton:*": ["<facilitator-party>::1220..."]
+    "canton:*": ["FTP-validator-1::1220c065ad977ae4e480b6ea5bcd96d6d73025a91ad27fa60d1385010ca01cdd39f9"]
   }
 }
 ```
