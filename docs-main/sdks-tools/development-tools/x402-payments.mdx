@@ -92,8 +92,8 @@ Canton provides native replay protection. `TransferCommand_Send` archives the co
 | `invalid_exact_canton_amount_mismatch` | `TransferCommand.amount` ≠ `PaymentRequirements.amount` (string mismatch) |
 | `invalid_exact_canton_expired` | `expiresAt` is past or within the 5-second safety margin |
 | `invalid_exact_canton_nonce_reuse` | Nonce is below the sender's `nextNonce` counter on Scan |
-| `invalid_exact_canton_resource_url_mismatch` | `description.resourceUrl` ≠ `resource.url` |
 | `invalid_exact_canton_merchant_not_registered` | `MerchantContract` absent or belongs to a different merchant |
+| `invalid_exact_canton_insufficient_balance` | `payer` Amulet holdings < `PaymentRequirements.amount` (local ACS check) |
 | `unexpected_canton_ledger_error` | Scan or ledger timeout not covered by the above codes |
 
 ## Related Pages
